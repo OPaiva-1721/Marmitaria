@@ -245,7 +245,7 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 
 ## 👨‍💻 Autor
 
-**Seu Nome**
+**Gabryel Paiva Neves**
 - GitHub: [@OPaiva-1721](https://github.com/OPaiva-1721)
 - LinkedIn: [Gabryel Paiva](www.linkedin.com/in/gabryel-paiva-17a21g)
 
