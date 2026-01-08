@@ -1,0 +1,20 @@
+# Core Django
+Django>=5.0.0,<6.0.0
+djangorestframework>=3.14.0,<4.0.0
+
+# CORS and Security
+django-cors-headers>=4.3.0,<5.0.0
+
+# Authentication
+djangorestframework-simplejwt>=5.3.0,<6.0.0
+
+# Image Processing
+Pillow>=11.0.0
+
+# Desktop Application
+PyQt6>=6.6.0,<7.0.0
+PyQt6-WebEngine>=6.6.0,<7.0.0
+
+# Packaging
+pyinstaller>=6.0.0,<7.0.0
+

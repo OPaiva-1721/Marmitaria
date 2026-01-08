@@ -1,0 +1,134 @@
+name: Build Linux Executable
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build-linux.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build-linux:
+    name: Build Linux Executable
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-xinerama0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1 \
+            libxkbcommon-x11-0 \
+            libxkbcommon0
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Prepare backend files
+        working-directory: ./backend
+        run: |
+          # Remover staticfiles antigo se existir
+          rm -rf staticfiles
+          cp -r ../frontend/dist staticfiles
+          
+          # Criar diretório templates se não existir
+          mkdir -p templates
+          
+          # Ajustar caminhos no index.html
+          sed 's|href="/assets/|href="/static/assets/|g; s|src="/assets/|src="/static/assets/|g' ../frontend/dist/index.html > templates/index.html
+
+      - name: Install Python dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations
+        working-directory: ./backend
+        run: |
+          python manage.py migrate --noinput
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
+
+      - name: Build executable with PyInstaller (onedir)
+        working-directory: ./backend
+        run: |
+          python -m PyInstaller marmitaria_desktop_onedir.spec --clean --noconfirm
+
+      - name: Verify executable exists
+        working-directory: ./backend
+        run: |
+          if [ -f "dist/Marmitaria/Marmitaria" ]; then
+            echo "Executable created successfully!"
+            ls -lh dist/Marmitaria/Marmitaria
+            chmod +x dist/Marmitaria/Marmitaria
+          else
+            echo "ERROR: Executable not found!"
+            ls -la dist/
+            exit 1
+          fi
+
+      - name: Create tarball
+        working-directory: ./backend/dist
+        run: |
+          tar -czf marmitaria-linux.tar.gz Marmitaria/
+
+      - name: Upload Linux executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: marmitaria-linux
+          path: |
+            backend/dist/Marmitaria/
+            backend/dist/marmitaria-linux.tar.gz
+          retention-days: 30
+
+      - name: Create Release Asset (if release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: backend/dist/marmitaria-linux.tar.gz
+          tag_name: ${{ github.event.release.tag_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

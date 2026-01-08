@@ -1,0 +1,108 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/build-windows.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build-windows:
+    name: Build Windows Executable
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Prepare backend files
+        working-directory: ./backend
+        run: |
+          # Criar diretório staticfiles se não existir
+          if (Test-Path staticfiles) { Remove-Item -Recurse -Force staticfiles }
+          Copy-Item -Recurse ../frontend/dist staticfiles
+          
+          # Criar diretório templates se não existir
+          if (-not (Test-Path templates)) { New-Item -ItemType Directory -Path templates }
+          
+          # Ajustar caminhos no index.html
+          (Get-Content ../frontend/dist/index.html) -replace 'href="/assets/', 'href="/static/assets/' -replace 'src="/assets/', 'src="/static/assets/' | Set-Content templates/index.html
+
+      - name: Install Python dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations
+        working-directory: ./backend
+        run: |
+          python manage.py migrate --noinput
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
+
+      - name: Build executable with PyInstaller
+        working-directory: ./backend
+        run: |
+          python -m PyInstaller marmitaria_desktop.spec --clean --noconfirm
+
+      - name: Verify executable exists
+        working-directory: ./backend
+        run: |
+          if (Test-Path dist\Marmitaria.exe) {
+            Write-Host "Executable created successfully!"
+            Get-Item dist\Marmitaria.exe | Select-Object Name, Length, LastWriteTime
+          } else {
+            Write-Host "ERROR: Executable not found!"
+            Get-ChildItem dist -Recurse | Select-Object FullName
+            exit 1
+          }
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: marmitaria-windows
+          path: backend/dist/Marmitaria.exe
+          retention-days: 30
+
+      - name: Create Release Asset (if release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: backend/dist/Marmitaria.exe
+          tag_name: ${{ github.event.release.tag_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
