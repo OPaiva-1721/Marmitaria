@@ -166,10 +166,12 @@ jobs:
           retention-days: 30
 
   create-release:
-    name: Create Release
+    name: Attach Release Assets
     needs: [build-windows, build-linux]
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
@@ -183,34 +185,93 @@ jobs:
           name: marmitaria-linux-tarball
           path: ./artifacts/linux
 
-      - name: Create Release
+      - name: Verify artifacts
+        run: |
+          echo "Verificando artefatos baixados..."
+          ls -lh ./artifacts/windows/ || echo "Windows artifact não encontrado"
+          ls -lh ./artifacts/linux/ || echo "Linux artifact não encontrado"
+          if [ ! -f "./artifacts/windows/Marmitaria.exe" ]; then
+            echo "ERRO: Marmitaria.exe não encontrado!"
+            exit 1
+          fi
+          if [ ! -f "./artifacts/linux/marmitaria-linux.tar.gz" ]; then
+            echo "ERRO: marmitaria-linux.tar.gz não encontrado!"
+            exit 1
+          fi
+          echo "✓ Todos os artefatos encontrados!"
+          echo "Tag da release: ${{ github.event.release.tag_name }}"
+          echo "ID da release: ${{ github.event.release.id }}"
+
+      - name: Attach files to Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             ./artifacts/windows/Marmitaria.exe
             ./artifacts/linux/marmitaria-linux.tar.gz
           tag_name: ${{ github.event.release.tag_name }}
-          name: Release ${{ github.event.release.tag_name }}
-          body: |
-            ## Executáveis Disponíveis
-            
-            ### Windows
-            - **Marmitaria.exe** - Executável standalone para Windows
-            
-            ### Linux
-            - **marmitaria-linux.tar.gz** - Arquivo compactado com executável para Linux
-            
-            ## Instruções
-            
-            ### Windows
-            1. Baixe o arquivo `Marmitaria.exe`
-            2. Execute o arquivo
-            3. O aplicativo criará automaticamente as pastas necessárias
-            
-            ### Linux
-            1. Baixe e extraia o arquivo `marmitaria-linux.tar.gz`
-            2. Entre na pasta extraída
-            3. Execute: `./Marmitaria`
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload assets via API (fallback)
+        if: failure()
+        run: |
+          echo "Tentando anexar arquivos via API do GitHub..."
+          RELEASE_ID="${{ github.event.release.id }}"
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          
+          # Se não tiver release_id, buscar pelo tag usando grep/sed
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ] || [ "$RELEASE_ID" == "" ]; then
+            echo "Buscando release pelo tag: $TAG_NAME"
+            RELEASE_RESPONSE=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME")
+            
+            RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+          fi
+          
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ] || [ "$RELEASE_ID" == "" ]; then
+            echo "ERRO: Não foi possível encontrar a release!"
+            echo "Tag: $TAG_NAME"
+            exit 1
+          fi
+          
+          echo "Release ID encontrado: $RELEASE_ID"
+          
+          # Upload Windows executable
+          echo "Enviando Marmitaria.exe..."
+          WINDOWS_RESPONSE=$(curl -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @./artifacts/windows/Marmitaria.exe \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=Marmitaria.exe")
+          
+          HTTP_CODE=$(echo "$WINDOWS_RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "Aviso: Falha ao enviar Marmitaria.exe (HTTP $HTTP_CODE)"
+          else
+            echo "✓ Marmitaria.exe enviado com sucesso!"
+          fi
+          
+          # Upload Linux tarball
+          echo "Enviando marmitaria-linux.tar.gz..."
+          LINUX_RESPONSE=$(curl -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @./artifacts/linux/marmitaria-linux.tar.gz \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=marmitaria-linux.tar.gz")
+          
+          HTTP_CODE=$(echo "$LINUX_RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "Aviso: Falha ao enviar marmitaria-linux.tar.gz (HTTP $HTTP_CODE)"
+            exit 1
+          else
+            echo "✓ marmitaria-linux.tar.gz enviado com sucesso!"
+          fi
+          
+          echo "✓ Todos os arquivos anexados com sucesso via API!"
 
