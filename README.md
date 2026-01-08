@@ -246,8 +246,8 @@ Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICE
 ## 👨‍💻 Autor
 
 **Seu Nome**
-- GitHub: [@seu-usuario](https://github.com/seu-usuario)
-- LinkedIn: [Seu Perfil](https://linkedin.com/in/seu-perfil)
+- GitHub: [@OPaiva-1721](https://github.com/OPaiva-1721)
+- LinkedIn: [Gabryel Paiva](www.linkedin.com/in/gabryel-paiva-17a21g)
 
 ---
 
