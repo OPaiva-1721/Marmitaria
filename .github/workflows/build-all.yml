@@ -62,6 +62,21 @@ jobs:
         env:
           SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
 
+      - name: Verify Windows executable
+        working-directory: ./backend
+        run: |
+          if (Test-Path dist\Marmitaria.exe) {
+            Write-Host "✓ Executável criado com sucesso!"
+            $file = Get-Item dist\Marmitaria.exe
+            Write-Host "Nome: $($file.Name)"
+            Write-Host "Tamanho: $([math]::Round($file.Length / 1MB, 2)) MB"
+            Write-Host "Data: $($file.LastWriteTime)"
+          } else {
+            Write-Host "✗ ERRO: Executável não encontrado!"
+            Get-ChildItem dist -Recurse | Select-Object FullName
+            exit 1
+          }
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
@@ -122,9 +137,26 @@ jobs:
         env:
           SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
 
+      - name: Verify Linux executable
+        working-directory: ./backend
+        run: |
+          if [ -f "dist/Marmitaria/Marmitaria" ]; then
+            echo "✓ Executável criado com sucesso!"
+            ls -lh dist/Marmitaria/Marmitaria
+            echo "Verificando permissões..."
+            test -x dist/Marmitaria/Marmitaria && echo "✓ Permissão de execução OK" || echo "✗ Erro: sem permissão de execução"
+          else
+            echo "✗ ERRO: Executável não encontrado!"
+            ls -la dist/
+            exit 1
+          fi
+
       - name: Create tarball
         working-directory: ./backend/dist
-        run: tar -czf marmitaria-linux.tar.gz Marmitaria/
+        run: |
+          tar -czf marmitaria-linux.tar.gz Marmitaria/
+          echo "✓ Tarball criado: marmitaria-linux.tar.gz"
+          ls -lh marmitaria-linux.tar.gz
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
