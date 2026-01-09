@@ -1,277 +1,187 @@
-name: Build All Executables
+name: Build Desktop App (Windows & Linux)
 
 on:
   push:
-    branches:
-      - main
-      - master
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/**'
-  pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
-  release:
-    types: [created]
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
-    name: Build Windows
     runs-on: windows-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          node-version: "18"
 
       - name: Build frontend
-        working-directory: ./frontend
+        working-directory: frontend
         run: |
           npm ci
           npm run build
 
       - name: Prepare backend
-        working-directory: ./backend
+        working-directory: backend
         run: |
           if (Test-Path staticfiles) { Remove-Item -Recurse -Force staticfiles }
           Copy-Item -Recurse ../frontend/dist staticfiles
           if (-not (Test-Path templates)) { New-Item -ItemType Directory -Path templates }
-          (Get-Content ../frontend/dist/index.html) -replace 'href="/assets/', 'href="/static/assets/' -replace 'src="/assets/', 'src="/static/assets/' | Set-Content templates/index.html
+          (Get-Content ../frontend/dist/index.html) `
+            -replace 'href="/assets/', 'href="/static/assets/' `
+            -replace 'src="/assets/', 'src="/static/assets/' `
+            | Set-Content templates/index.html
 
-      - name: Install dependencies and build
-        working-directory: ./backend
+      - name: Build Windows executable
+        working-directory: backend
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements.txt
           python manage.py migrate --noinput
-          python -m PyInstaller marmitaria_desktop.spec --clean --noconfirm
+          pyinstaller marmitaria_desktop.spec --clean --noconfirm
         env:
-          SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
+          SECRET_KEY: django-insecure-build-key
 
       - name: Verify Windows executable
-        working-directory: ./backend
+        working-directory: backend
         run: |
           if (Test-Path dist\Marmitaria.exe) {
-            Write-Host "✓ Executável criado com sucesso!"
             $file = Get-Item dist\Marmitaria.exe
-            Write-Host "Nome: $($file.Name)"
-            Write-Host "Tamanho: $([math]::Round($file.Length / 1MB, 2)) MB"
-            Write-Host "Data: $($file.LastWriteTime)"
+            Write-Host "✓ Executável criado: $($file.Name) ($([math]::Round($file.Length / 1MB, 2)) MB)"
           } else {
             Write-Host "✗ ERRO: Executável não encontrado!"
-            Get-ChildItem dist -Recurse | Select-Object FullName
             exit 1
           }
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: marmitaria-windows-exe
+          name: windows-exe
           path: backend/dist/Marmitaria.exe
-          retention-days: 30
 
   build-linux:
-    name: Build Linux
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          node-version: "18"
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libxcb-xinerama0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
-            libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 libxkbcommon0
+            libxcb-xinerama0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-sync1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1 \
+            libxkbcommon-x11-0 \
+            libxkbcommon0
 
       - name: Build frontend
-        working-directory: ./frontend
+        working-directory: frontend
         run: |
           npm ci
           npm run build
 
       - name: Prepare backend
-        working-directory: ./backend
+        working-directory: backend
         run: |
           rm -rf staticfiles
           cp -r ../frontend/dist staticfiles
           mkdir -p templates
-          sed 's|href="/assets/|href="/static/assets/|g; s|src="/assets/|src="/static/assets/|g' ../frontend/dist/index.html > templates/index.html
+          sed 's|href="/assets/|href="/static/assets/|g; s|src="/assets/|src="/static/assets/|g' \
+            ../frontend/dist/index.html > templates/index.html
 
-      - name: Install dependencies and build
-        working-directory: ./backend
+      - name: Build Linux executable
+        working-directory: backend
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements.txt
           python manage.py migrate --noinput
-          python -m PyInstaller marmitaria_desktop_onedir.spec --clean --noconfirm
+          pyinstaller marmitaria_desktop_onedir.spec --clean --noconfirm
           chmod +x dist/Marmitaria/Marmitaria
         env:
-          SECRET_KEY: ${{ secrets.SECRET_KEY || 'django-insecure-temp-key-for-build' }}
+          SECRET_KEY: django-insecure-build-key
 
       - name: Verify Linux executable
-        working-directory: ./backend
+        working-directory: backend
         run: |
           if [ -f "dist/Marmitaria/Marmitaria" ]; then
-            echo "✓ Executável criado com sucesso!"
-            ls -lh dist/Marmitaria/Marmitaria
-            echo "Verificando permissões..."
-            test -x dist/Marmitaria/Marmitaria && echo "✓ Permissão de execução OK" || echo "✗ Erro: sem permissão de execução"
+            echo "✓ Executável criado: $(ls -lh dist/Marmitaria/Marmitaria | awk '{print $5, $9}')"
+            test -x dist/Marmitaria/Marmitaria || (echo "✗ Erro: sem permissão de execução" && exit 1)
           else
             echo "✗ ERRO: Executável não encontrado!"
-            ls -la dist/
             exit 1
           fi
 
       - name: Create tarball
-        working-directory: ./backend/dist
+        working-directory: backend/dist
         run: |
           tar -czf marmitaria-linux.tar.gz Marmitaria/
-          echo "✓ Tarball criado: marmitaria-linux.tar.gz"
-          ls -lh marmitaria-linux.tar.gz
+          echo "✓ Tarball criado: $(ls -lh marmitaria-linux.tar.gz | awk '{print $5, $9}')"
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: marmitaria-linux-tarball
+          name: linux-tar
           path: backend/dist/marmitaria-linux.tar.gz
-          retention-days: 30
 
-  create-release:
-    name: Attach Release Assets
+  release:
     needs: [build-windows, build-linux]
-    if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: marmitaria-windows-exe
-          path: ./artifacts/windows
 
-      - name: Download Linux artifact
+    steps:
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: marmitaria-linux-tarball
-          path: ./artifacts/linux
+          path: artifacts
 
       - name: Verify artifacts
         run: |
           echo "Verificando artefatos baixados..."
-          ls -lh ./artifacts/windows/ || echo "Windows artifact não encontrado"
-          ls -lh ./artifacts/linux/ || echo "Linux artifact não encontrado"
-          if [ ! -f "./artifacts/windows/Marmitaria.exe" ]; then
-            echo "ERRO: Marmitaria.exe não encontrado!"
+          ls -R artifacts/ || true
+          if [ ! -f "artifacts/windows-exe/Marmitaria.exe" ]; then
+            echo "✗ ERRO: Marmitaria.exe não encontrado!"
             exit 1
           fi
-          if [ ! -f "./artifacts/linux/marmitaria-linux.tar.gz" ]; then
-            echo "ERRO: marmitaria-linux.tar.gz não encontrado!"
+          if [ ! -f "artifacts/linux-tar/marmitaria-linux.tar.gz" ]; then
+            echo "✗ ERRO: marmitaria-linux.tar.gz não encontrado!"
             exit 1
           fi
           echo "✓ Todos os artefatos encontrados!"
-          echo "Tag da release: ${{ github.event.release.tag_name }}"
-          echo "ID da release: ${{ github.event.release.id }}"
 
-      - name: Attach files to Release
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
-            ./artifacts/windows/Marmitaria.exe
-            ./artifacts/linux/marmitaria-linux.tar.gz
-          tag_name: ${{ github.event.release.tag_name }}
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Upload assets via API (fallback)
-        if: failure()
-        run: |
-          echo "Tentando anexar arquivos via API do GitHub..."
-          RELEASE_ID="${{ github.event.release.id }}"
-          TAG_NAME="${{ github.event.release.tag_name }}"
-          
-          # Se não tiver release_id, buscar pelo tag usando grep/sed
-          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ] || [ "$RELEASE_ID" == "" ]; then
-            echo "Buscando release pelo tag: $TAG_NAME"
-            RELEASE_RESPONSE=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG_NAME")
-            
-            RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-          fi
-          
-          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ] || [ "$RELEASE_ID" == "" ]; then
-            echo "ERRO: Não foi possível encontrar a release!"
-            echo "Tag: $TAG_NAME"
-            exit 1
-          fi
-          
-          echo "Release ID encontrado: $RELEASE_ID"
-          
-          # Upload Windows executable
-          echo "Enviando Marmitaria.exe..."
-          WINDOWS_RESPONSE=$(curl -w "\n%{http_code}" -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @./artifacts/windows/Marmitaria.exe \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=Marmitaria.exe")
-          
-          HTTP_CODE=$(echo "$WINDOWS_RESPONSE" | tail -n1)
-          if [ "$HTTP_CODE" != "201" ]; then
-            echo "Aviso: Falha ao enviar Marmitaria.exe (HTTP $HTTP_CODE)"
-          else
-            echo "✓ Marmitaria.exe enviado com sucesso!"
-          fi
-          
-          # Upload Linux tarball
-          echo "Enviando marmitaria-linux.tar.gz..."
-          LINUX_RESPONSE=$(curl -w "\n%{http_code}" -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/gzip" \
-            --data-binary @./artifacts/linux/marmitaria-linux.tar.gz \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=marmitaria-linux.tar.gz")
-          
-          HTTP_CODE=$(echo "$LINUX_RESPONSE" | tail -n1)
-          if [ "$HTTP_CODE" != "201" ]; then
-            echo "Aviso: Falha ao enviar marmitaria-linux.tar.gz (HTTP $HTTP_CODE)"
-            exit 1
-          else
-            echo "✓ marmitaria-linux.tar.gz enviado com sucesso!"
-          fi
-          
-          echo "✓ Todos os arquivos anexados com sucesso via API!"
-
+            artifacts/windows-exe/Marmitaria.exe
+            artifacts/linux-tar/marmitaria-linux.tar.gz
